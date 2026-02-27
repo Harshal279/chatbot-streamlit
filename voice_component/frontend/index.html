@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: transparent;
+    }
+
+    .voice-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 16px;
+      gap: 12px;
+    }
+
+    /* State indicator */
+    .state-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 20px;
+      border-radius: 24px;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.3s ease;
+    }
+
+    .state-idle {
+      background: rgba(107, 114, 128, 0.15);
+      color: #9ca3af;
+      border: 1px solid rgba(107, 114, 128, 0.3);
+    }
+
+    .state-speaking {
+      background: rgba(124, 58, 237, 0.15);
+      color: #c4b5fd;
+      border: 1px solid rgba(124, 58, 237, 0.35);
+    }
+
+    .state-listening {
+      background: rgba(34, 197, 94, 0.15);
+      color: #86efac;
+      border: 1px solid rgba(34, 197, 94, 0.35);
+    }
+
+    .state-processing {
+      background: rgba(234, 179, 8, 0.15);
+      color: #fde047;
+      border: 1px solid rgba(234, 179, 8, 0.35);
+    }
+
+    /* Animated dot */
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+
+    .dot-gray {
+      background: #6b7280;
+    }
+
+    .dot-purple {
+      background: #a855f7;
+    }
+
+    .dot-green {
+      background: #22c55e;
+    }
+
+    .dot-yellow {
+      background: #eab308;
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1;
+        transform: scale(1);
+      }
+
+      50% {
+        opacity: 0.4;
+        transform: scale(0.7);
+      }
+    }
+
+    /* Visualizer bars */
+    .visualizer {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      height: 32px;
+    }
+
+    .bar {
+      width: 4px;
+      border-radius: 2px;
+      background: #22c55e;
+      transition: height 0.05s ease;
+      min-height: 4px;
+    }
+
+    /* Mic button */
+    .mic-btn {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      border: 2px solid rgba(124, 58, 237, 0.4);
+      background: rgba(124, 58, 237, 0.15);
+      color: #c4b5fd;
+      font-size: 24px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    .mic-btn:hover {
+      background: rgba(124, 58, 237, 0.25);
+      border-color: rgba(124, 58, 237, 0.6);
+      transform: scale(1.05);
+    }
+
+    .mic-btn.active {
+      background: rgba(34, 197, 94, 0.2);
+      border-color: rgba(34, 197, 94, 0.5);
+      color: #86efac;
+      animation: pulse-ring 1.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse-ring {
+      0% {
+        box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
+      }
+
+      70% {
+        box-shadow: 0 0 0 12px rgba(34, 197, 94, 0);
+      }
+
+      100% {
+        box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+      }
+    }
+
+    .error-msg {
+      color: #f87171;
+      font-size: 12px;
+      padding: 4px 12px;
+      border-radius: 8px;
+      background: rgba(248, 113, 113, 0.1);
+    }
+  </style>
+</head>
+
+<body>
+  <div class="voice-container" id="container">
+    <!-- State indicator -->
+    <div class="state-indicator state-idle" id="stateIndicator">
+      <div class="dot dot-gray" id="stateDot"></div>
+      <span id="stateText">Click mic to start voice chat</span>
+    </div>
+
+    <!-- Audio visualizer (shown during listening) -->
+    <div class="visualizer" id="visualizer" style="display:none;">
+      <div class="bar" id="bar0"></div>
+      <div class="bar" id="bar1"></div>
+      <div class="bar" id="bar2"></div>
+      <div class="bar" id="bar3"></div>
+      <div class="bar" id="bar4"></div>
+      <div class="bar" id="bar5"></div>
+      <div class="bar" id="bar6"></div>
+      <div class="bar" id="bar7"></div>
+      <div class="bar" id="bar8"></div>
+      <div class="bar" id="bar9"></div>
+      <div class="bar" id="bar10"></div>
+      <div class="bar" id="bar11"></div>
+      <div class="bar" id="bar12"></div>
+      <div class="bar" id="bar13"></div>
+      <div class="bar" id="bar14"></div>
+    </div>
+
+    <!-- Start button -->
+    <button class="mic-btn" id="micBtn" onclick="startVoiceLoop()">&#127908;</button>
+
+    <!-- Hidden audio player for TTS -->
+    <audio id="ttsPlayer" style="display:none;"></audio>
+
+    <!-- Error display -->
+    <div class="error-msg" id="errorMsg" style="display:none;"></div>
+  </div>
+
+  <script>
+    // ═══════════════════════════════════════════════════════════════════════════
+    // STREAMLIT COMPONENT API (postMessage-based for pure HTML components)
+    // ═══════════════════════════════════════════════════════════════════════════
+    function sendToStreamlit(type, data) {
+      const msg = Object.assign({ isStreamlitMessage: true, type: type }, data);
+      window.parent.postMessage(msg, "*");
+    }
+
+    function componentReady() {
+      sendToStreamlit("streamlit:componentReady", { apiVersion: 1 });
+    }
+
+    function setFrameHeight(h) {
+      sendToStreamlit("streamlit:setFrameHeight", { height: h });
+    }
+
+    function setComponentValue(value) {
+      sendToStreamlit("streamlit:setComponentValue", { value: value });
+    }
+
+    // Listen for render events from Streamlit
+    window.addEventListener("message", (event) => {
+      if (event.data.type === "streamlit:render") {
+        onRender(event.data);
+      }
+    });
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // STATE MACHINE
+    // ═══════════════════════════════════════════════════════════════════════════
+    const State = { IDLE: 'idle', SPEAKING: 'speaking', LISTENING: 'listening', PROCESSING: 'processing' };
+    let currentState = State.IDLE;
+    let micStream = null;
+    let mediaRecorder = null;
+    let audioContext = null;
+    let analyserNode = null;
+    let recordedChunks = [];
+    let silenceTimer = null;
+    let speechDetected = false;
+    let animationFrame = null;
+    let loopActive = false;
+
+    // Config defaults (overridden by Python)
+    const CONFIG = {
+      silenceThreshold: 0.015,
+      silenceDuration: 1500,
+      micDelayMs: 300,
+      minSpeechDuration: 500
+    };
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // UI UPDATES
+    // ═══════════════════════════════════════════════════════════════════════════
+    function setState(newState, text) {
+      currentState = newState;
+      const indicator = document.getElementById('stateIndicator');
+      const dot = document.getElementById('stateDot');
+      const label = document.getElementById('stateText');
+      const viz = document.getElementById('visualizer');
+      const btn = document.getElementById('micBtn');
+
+      indicator.className = 'state-indicator state-' + newState;
+      label.textContent = text || newState;
+
+      // Dot color
+      dot.className = 'dot';
+      if (newState === State.IDLE) dot.classList.add('dot-gray');
+      else if (newState === State.SPEAKING) dot.classList.add('dot-purple');
+      else if (newState === State.LISTENING) dot.classList.add('dot-green');
+      else if (newState === State.PROCESSING) dot.classList.add('dot-yellow');
+
+      // Show/hide visualizer
+      viz.style.display = (newState === State.LISTENING) ? 'flex' : 'none';
+
+      // Show/hide mic button — only visible when idle and loop not active
+      btn.style.display = (newState === State.IDLE && !loopActive) ? 'flex' : 'none';
+
+      // Update frame height
+      setFrameHeight(document.getElementById('container').scrollHeight + 10);
+    }
+
+    function showError(msg) {
+      const el = document.getElementById('errorMsg');
+      el.textContent = msg;
+      el.style.display = 'block';
+      setTimeout(() => { el.style.display = 'none'; }, 5000);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MIC CONTROL
+    // ═══════════════════════════════════════════════════════════════════════════
+    async function initMic() {
+      if (micStream) return true;
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 }
+        });
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const source = audioContext.createMediaStreamSource(micStream);
+        analyserNode = audioContext.createAnalyser();
+        analyserNode.fftSize = 2048;
+        source.connect(analyserNode);
+        return true;
+      } catch (e) {
+        showError('Mic access denied: ' + e.message);
+        return false;
+      }
+    }
+
+    function startRecording() {
+      recordedChunks = [];
+      speechDetected = false;
+      const speechStartTime = Date.now();
+
+      // Pick a supported MIME type
+      let mimeType = 'audio/webm;codecs=opus';
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'audio/webm';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+          mimeType = '';  // let browser choose
+        }
+      }
+
+      const options = mimeType ? { mimeType: mimeType } : {};
+      mediaRecorder = new MediaRecorder(micStream, options);
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunks.push(e.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        const duration = Date.now() - speechStartTime;
+        if (!speechDetected || duration < CONFIG.minSpeechDuration) {
+          // Too short — go back to listening
+          if (loopActive && currentState !== State.IDLE) {
+            setTimeout(() => startListening(), 200);
+          }
+          return;
+        }
+
+        // Send captured audio to Python
+        const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+        setState(State.PROCESSING, 'Processing...');
+        blobToBase64(blob).then(b64 => {
+          setComponentValue({ audio_b64: b64, timestamp: Date.now() });
+        });
+      };
+
+      mediaRecorder.start(100);
+      startVAD();
+    }
+
+    function stopRecording() {
+      if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+      if (animationFrame) { cancelAnimationFrame(animationFrame); animationFrame = null; }
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // VAD (Voice Activity Detection)
+    // ═══════════════════════════════════════════════════════════════════════════
+    function startVAD() {
+      const bufferLength = analyserNode.fftSize;
+      const dataArray = new Uint8Array(bufferLength);
+      let silenceStart = null;
+
+      function checkAudio() {
+        if (currentState !== State.LISTENING) return;
+
+        analyserNode.getByteTimeDomainData(dataArray);
+
+        // Calculate RMS energy
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          const val = (dataArray[i] - 128) / 128.0;
+          sum += val * val;
+        }
+        const rms = Math.sqrt(sum / bufferLength);
+
+        // Update visualizer
+        updateVisualizer(rms, dataArray);
+
+        if (rms > CONFIG.silenceThreshold) {
+          speechDetected = true;
+          silenceStart = null;
+        } else if (speechDetected) {
+          if (!silenceStart) {
+            silenceStart = Date.now();
+          } else if (Date.now() - silenceStart > CONFIG.silenceDuration) {
+            stopRecording();
+            return;
+          }
+        }
+
+        animationFrame = requestAnimationFrame(checkAudio);
+      }
+
+      animationFrame = requestAnimationFrame(checkAudio);
+    }
+
+    function updateVisualizer(rms, dataArray) {
+      const numBars = 15;
+      const step = Math.floor(dataArray.length / numBars);
+      for (let i = 0; i < numBars; i++) {
+        const val = Math.abs(dataArray[i * step] - 128) / 128.0;
+        const height = Math.max(4, val * 32 + rms * 60);
+        const bar = document.getElementById('bar' + i);
+        if (bar) bar.style.height = height + 'px';
+      }
+    }
+
+    let lastPlayedTTS = '';   // Prevent replaying same audio on reruns
+    let isPlaying = false;     // Guard against overlapping play() calls
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // TTS PLAYBACK
+    // ═══════════════════════════════════════════════════════════════════════════
+    function playTTS(audioB64) {
+      // Skip if already playing this exact audio
+      if (audioB64 === lastPlayedTTS) return;
+      lastPlayedTTS = audioB64;
+
+      const player = document.getElementById('ttsPlayer');
+
+      // Stop any current playback first
+      if (isPlaying) {
+        player.pause();
+        player.currentTime = 0;
+      }
+
+      setState(State.SPEAKING, 'Speaking...');
+      isPlaying = true;
+
+      player.onended = () => {
+        isPlaying = false;
+        if (loopActive) {
+          setTimeout(() => startListening(), CONFIG.micDelayMs);
+        } else {
+          setState(State.IDLE, 'Click mic to start voice chat');
+        }
+      };
+
+      player.onerror = () => {
+        isPlaying = false;
+        if (loopActive) setTimeout(() => startListening(), CONFIG.micDelayMs);
+      };
+
+      // Use a blob URL instead of data URI for better browser handling
+      try {
+        const byteChars = atob(audioB64);
+        const byteArray = new Uint8Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) {
+          byteArray[i] = byteChars.charCodeAt(i);
+        }
+        const blob = new Blob([byteArray], { type: 'audio/mp3' });
+        const blobUrl = URL.createObjectURL(blob);
+
+        player.src = blobUrl;
+        player.play().then(() => {
+          // Playing successfully
+        }).catch(e => {
+          isPlaying = false;
+          if (loopActive) setTimeout(() => startListening(), CONFIG.micDelayMs);
+        });
+      } catch (e) {
+        isPlaying = false;
+        if (loopActive) setTimeout(() => startListening(), CONFIG.micDelayMs);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // LOOP CONTROL
+    // ═══════════════════════════════════════════════════════════════════════════
+    async function startVoiceLoop() {
+      const ok = await initMic();
+      if (!ok) return;
+      loopActive = true;
+      document.getElementById('micBtn').style.display = 'none';
+      startListening();
+    }
+
+    async function startListening() {
+      if (!loopActive) {
+        setState(State.IDLE, 'Click mic to start voice chat');
+        return;
+      }
+      // Re-init mic (needed after Streamlit recreates the iframe on rerun)
+      const ok = await initMic();
+      if (!ok) {
+        setState(State.IDLE, 'Mic unavailable');
+        return;
+      }
+      setState(State.LISTENING, 'Listening...');
+      startRecording();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // DATA HELPERS
+    // ═══════════════════════════════════════════════════════════════════════════
+    function blobToBase64(blob) {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result.split(',')[1]);
+        reader.readAsDataURL(blob);
+      });
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // RENDER HANDLER (called by Streamlit on each rerun)
+    // ═══════════════════════════════════════════════════════════════════════════
+    function onRender(data) {
+      if (!data || !data.args) return;
+
+      // Update config from Python
+      if (data.args.silence_threshold) CONFIG.silenceThreshold = data.args.silence_threshold;
+      if (data.args.silence_duration) CONFIG.silenceDuration = data.args.silence_duration * 1000;
+      if (data.args.mic_delay_ms) CONFIG.micDelayMs = data.args.mic_delay_ms;
+      if (data.args.min_speech_duration) CONFIG.minSpeechDuration = data.args.min_speech_duration * 1000;
+
+      // If TTS audio provided and it's NEW, play it
+      if (data.args.tts_audio_b64 && data.args.tts_audio_b64 !== '' && data.args.tts_audio_b64 !== lastPlayedTTS) {
+        loopActive = true;
+        document.getElementById('micBtn').style.display = 'none';
+        playTTS(data.args.tts_audio_b64);
+      }
+
+      setFrameHeight(document.getElementById('container').scrollHeight + 10);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // INIT — tell Streamlit this component is ready
+    // ═══════════════════════════════════════════════════════════════════════════
+    componentReady();
+    setFrameHeight(120);
+  </script>
+</body>
+
+</html>
